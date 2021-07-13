@@ -17,26 +17,33 @@ order of countrya and apply it to the mirrored value.
 number_of_cores = multiprocessing.cpu_count()
 data: pd.DataFrame
 nulls: pd.DataFrame
+nulls_to_skip = pd.DataFrame()
 
 def replace_nulls_in_data(nulls_to_clean, thread_number):
     global data
+    global nulls_to_skip
     print(f"Thread {thread_number} is working on replacing nulls {nulls_to_clean[0]} to {nulls_to_clean[len(nulls_to_clean) - 1]}")
     for null in nulls_to_clean:
-        try:
-            condition = ((data.countryb == data.loc[null, :][0])& 
-                    (data.countrya == data.loc[null, :][1]) & 
-                    (data.year == data.loc[null, :][2]))
-            if data.loc[condition, var].isnull().any():  #ignore if mirrored value is also null
-                continue
-            else:
-                data.loc[null, var] = data.loc[condition, var].values[0] # replace null with mirror value
-        except Exception as e:
-            print(f"Thread {thread_number} crashed due to {e}")
+        if null in nulls_to_skip['row_index']:
+            continue
+        else:
+            try:
+                condition = ((data.countryb == data.loc[null, :][0])& 
+                        (data.countrya == data.loc[null, :][1]) & 
+                        (data.year == data.loc[null, :][2]))
+                if data.loc[condition, var].isnull().any():  #ignore if mirrored value is also null
+                    null_to_skip = pd.DataFrame({"id":data.loc[condition, 'directeddyadid'], "row_index":null})
+                    nulls_to_skip = nulls_to_skip.append(null_to_skip)
+                else:
+                    data.loc[null, var] = data.loc[condition, var].values[0] # replace null with mirror value
+            except Exception as e:
+                print(f"Thread {thread_number} crashed due to {e}")
 
     print(f"Thread Number {thread_number} is done replacing nulls")
     
 
 def correct_non_null_values(years, thread_number):
+    global nulls_to_skip
     for year in years:
         print(f"Thread {thread_number} is working on year {year}")
         countries = data.loc[data.year == year, 'countrya'].unique()
@@ -44,29 +51,21 @@ def correct_non_null_values(years, thread_number):
         for countrya in countries:
             for countryb in countries:
                 pair = [countrya, countryb]
-                if countrya == countryb:
+                condition_a = (data.countrya == countrya) & (data.countryb == countryb) & (data.year == year)
+                condition_b = (data.countrya == countryb)&(data.countryb == countrya) & (data.year == year)
+                id_a = data.loc[condition_a, "directeddyadid"]
+                id_b = data.loc[condition_b, "directeddyadid"]
+                if id_a in nulls_to_skip['id'] or id_b in nulls_to_skip['id']: #If we already know they are both null, skip
                     continue
-                #check if pairs have been used
-                elif pair in used:
+                elif (countrya == countryb) or (pair in used) or ([countryb, countrya] in used): #If we know this pair has already been cleaned, skip
                     continue
-                #check if reverse pair has been corrected
-                elif [countryb, countrya] in used:
-                    continue
-                    
                 #else fix values that exist
                 else:
-                    condition_a = (data.countrya == countrya) & (data.countryb == countryb) & (data.year == year)
-                    condition_b = (data.countrya == countryb)&(data.countryb == countrya) & (data.year == year)
-                    
-                    #check if both values are null (if true continue)
-                    if (data.loc[condition_a, var].isnull().any()== True) & (data.loc[condition_a, var].isnull().any() == True):
-                        continue
-                    else:
-                        #set value for reverse pair
-                        data.loc[condition_b, var] = data.loc[condition_a, var].values[0]
+                    #set value for reverse pair
+                    data.loc[condition_b, var] = data.loc[condition_a, var].values[0]
 
                 used.append(pair)
-            print(f"Thread {thread_number} is done with year {year}")
+        print(f"Thread {thread_number} is done with year {year}")
 
 #__________  Initialization _____________
 if __name__ == "__main__":
@@ -77,13 +76,15 @@ if __name__ == "__main__":
     #read file
 
 
-    data = pd.read_csv(path)
+    data = pd.read_csv(path, low_memory=False)
     start_time = time.time()
     print('---', var, '---')
 
     #________________________________________
     ### Fix Null Values
     nulls = data[data[var].isnull()].index.tolist() # make list of null value index
+    nulls_to_skip["id"] = ""
+    nulls_to_skip["row_index"] = ""
     nulls_per_thread = len(nulls) / number_of_cores
     nulls_per_thread = round(nulls_per_thread)
     thread_nulls = list
@@ -132,7 +133,8 @@ if __name__ == "__main__":
 
     for thread in threads:
         thread.join()
-
+    data_out = data[['directeddyadid', var]]
+    data_out.to_csv(f"{cwd}\\cleaned_data_{var}.csv")
     time_taken = round(time.time() - start_time, 2)
     print(time_taken)
     print('____________________')
