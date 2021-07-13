@@ -125,7 +125,7 @@ if __name__ == "__main__":
             else:
                 thread_start = (years_per_thread * core)
                 thread_end = len(years)
-                thread_years= nulls[thread_start : thread_end]
+                thread_years= years[thread_start : thread_end]
             try:
                 thread = threading.Thread(target= correct_non_null_values, args=(thread_years, core))
                 threads.append(thread)
