@@ -55,7 +55,7 @@ def correct_non_null_values(years, thread_number):
                 condition_b = (data.countrya == countryb)&(data.countryb == countrya) & (data.year == year)
                 id_a = data.loc[condition_a, "directeddyadid"]
                 id_b = data.loc[condition_b, "directeddyadid"]
-                if id_a in nulls_to_skip['id'] or id_b in nulls_to_skip['id']: #If we already know they are both null, skip
+                if tuple(id_a) in nulls_to_skip['id'] or tuple(id_b) in nulls_to_skip['id']: #If we already know they are both null, skip
                     continue
                 elif (countrya == countryb) or (pair in used) or ([countryb, countrya] in used): #If we know this pair has already been cleaned, skip
                     continue
@@ -71,72 +71,76 @@ def correct_non_null_values(years, thread_number):
 if __name__ == "__main__":
     cwd = os.getcwd()
     path = cwd + "\GIDE_1.82_20201002_.csv"
-    var = 'totaltradeawithb'  #set variable name
+    #var = 'totaltradeawithb'  #set variable name
 
-    #read file
+    data = pd.read_csv(path, low_memory=False) #If you have less than 32GB of ram then set "low_memory" to True!
+    variables = [] #Put in Variables as Array of Strings, then run DOUBLE CHECK CAPITALIZATION AND SPELLING ARE CORRECT!
 
+    #Once a Variable is done, while the next is running do a quick review of the output CSV for any obvious mistakes.
+    #If it looks clean then you may remove it from the above array so errors don't cause retreading.
+    #If there is a clear issue, start searching for what caused it and let Cory know, so we can make sure this isn't systemic to other variables
+    for variable in variables:
+        start_time = time.time()
+        print('---', variable, '---')
 
-    data = pd.read_csv(path, low_memory=False)
-    start_time = time.time()
-    print('---', var, '---')
+        #________________________________________
+        ### Fix Null Values
+        nulls = data[data[variable].isnull()].index.tolist() # make list of null value index
+        nulls_to_skip["id"] = ""
+        nulls_to_skip["row_index"] = ""
+        nulls_per_thread = len(nulls) / number_of_cores
+        nulls_per_thread = round(nulls_per_thread)
+        thread_nulls = list
+        threads = []
+        for core in range(0, number_of_cores):
+            if core != number_of_cores - 1:
+                thread_start = (nulls_per_thread * core)
+                thread_end = (nulls_per_thread * (core + 1))
+                thread_nulls = nulls[thread_start : thread_end]
+            else:
+                thread_start = (nulls_per_thread * core)
+                thread_end = len(nulls)
+                thread_nulls= nulls[thread_start : thread_end]
+            try:
+                thread = threading.Thread(target= replace_nulls_in_data, args=(thread_nulls, core))
+                threads.append(thread)
+            except Exception as e:
+                print(f"I was stopped from launching thread {core} because of {e}")
+        for thread in threads:
+            thread.start()
 
-    #________________________________________
-    ### Fix Null Values
-    nulls = data[data[var].isnull()].index.tolist() # make list of null value index
-    nulls_to_skip["id"] = ""
-    nulls_to_skip["row_index"] = ""
-    nulls_per_thread = len(nulls) / number_of_cores
-    nulls_per_thread = round(nulls_per_thread)
-    thread_nulls = list
-    threads = []
-    for core in range(0, number_of_cores):
-        if core != number_of_cores - 1:
-            thread_start = (nulls_per_thread * core)
-            thread_end = (nulls_per_thread * (core + 1))
-            thread_nulls = nulls[thread_start : thread_end]
-        else:
-            thread_start = (nulls_per_thread * core)
-            thread_end = len(nulls)
-            thread_nulls= nulls[thread_start : thread_end]
-        try:
-            thread = threading.Thread(target= replace_nulls_in_data, args=(thread_nulls, core))
-            threads.append(thread)
-        except Exception as e:
-            print(f"I was stopped from launching thread {core} because of {e}")
-    for thread in threads:
-        thread.start()
+        for thread in threads:
+            thread.join()
+        
+        years = data.year.unique()
+        year_range = len(years)
+        years_per_thread = year_range / number_of_cores
+        years_per_thread = round(years_per_thread)
+        threads = []
+        for core in range(0, number_of_cores):
+            if core != number_of_cores - 1:
+                thread_start = (years_per_thread * core)
+                thread_end = (years_per_thread * (core + 1))
+                thread_years = years[thread_start : thread_end]
+            else:
+                thread_start = (years_per_thread * core)
+                thread_end = len(years)
+                thread_years= nulls[thread_start : thread_end]
+            try:
+                thread = threading.Thread(target= correct_non_null_values, args=(thread_years, core))
+                threads.append(thread)
+            except Exception as e:
+                print(f"I was stopped from launching thread {core} because of {e}")
+        for thread in threads:
+            thread.start()
 
-    for thread in threads:
-        thread.join()
-    
-    years = data.year.unique()
-    year_range = len(years)
-    years_per_thread = year_range / number_of_cores
-    years_per_thread = round(years_per_thread)
-    threads = []
-    for core in range(0, number_of_cores):
-        if core != number_of_cores - 1:
-            thread_start = (years_per_thread * core)
-            thread_end = (years_per_thread * (core + 1))
-            thread_years = years[thread_start : thread_end]
-        else:
-            thread_start = (years_per_thread * core)
-            thread_end = len(years)
-            thread_years= nulls[thread_start : thread_end]
-        try:
-            thread = threading.Thread(target= correct_non_null_values, args=(thread_years, core))
-            threads.append(thread)
-        except Exception as e:
-            print(f"I was stopped from launching thread {core} because of {e}")
-    for thread in threads:
-        thread.start()
-
-    for thread in threads:
-        thread.join()
-    data_out = data[['directeddyadid', var]]
-    data_out.to_csv(f"{cwd}\\cleaned_data_{var}.csv")
-    time_taken = round(time.time() - start_time, 2)
-    print(time_taken)
-    print('____________________')
+        for thread in threads:
+            thread.join()
+        #All of the below will allow us to keep progress of variables if a crash happens
+        data_out = data[['directeddyadid', variable]]
+        data_out.to_csv(f"{cwd}\\cleaned_variables\\cleaned_data_{variable}.csv") #The output CSV will have a primary key and the cleaned variable
+        time_taken = round(time.time() - start_time, 2)
+        print(time_taken)
+        print('____________________')
 
 
