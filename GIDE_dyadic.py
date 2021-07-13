@@ -19,7 +19,7 @@ data: pd.DataFrame
 nulls: pd.DataFrame
 nulls_to_skip = pd.DataFrame()
 
-def replace_nulls_in_data(nulls_to_clean, thread_number):
+def replace_nulls_in_data(nulls_to_clean, variable, thread_number):
     global data
     global nulls_to_skip
     print(f"Thread {thread_number} is working on replacing nulls {nulls_to_clean[0]} to {nulls_to_clean[len(nulls_to_clean) - 1]}")
@@ -31,18 +31,18 @@ def replace_nulls_in_data(nulls_to_clean, thread_number):
                 condition = ((data.countryb == data.loc[null, :][0])& 
                         (data.countrya == data.loc[null, :][1]) & 
                         (data.year == data.loc[null, :][2]))
-                if data.loc[condition, var].isnull().any():  #ignore if mirrored value is also null
+                if data.loc[condition, variable].isnull().any():  #ignore if mirrored value is also null
                     null_to_skip = pd.DataFrame({"id":data.loc[condition, 'directeddyadid'], "row_index":null})
                     nulls_to_skip = nulls_to_skip.append(null_to_skip)
                 else:
-                    data.loc[null, var] = data.loc[condition, var].values[0] # replace null with mirror value
+                    data.loc[null, variable] = data.loc[condition, variable].values[0] # replace null with mirror value
             except Exception as e:
                 print(f"Thread {thread_number} crashed due to {e}")
 
     print(f"Thread Number {thread_number} is done replacing nulls")
     
 
-def correct_non_null_values(years, thread_number):
+def correct_non_null_values(years, variable, thread_number):
     global nulls_to_skip
     for year in years:
         print(f"Thread {thread_number} is working on year {year}")
@@ -55,14 +55,15 @@ def correct_non_null_values(years, thread_number):
                 condition_b = (data.countrya == countryb)&(data.countryb == countrya) & (data.year == year)
                 id_a = data.loc[condition_a, "directeddyadid"]
                 id_b = data.loc[condition_b, "directeddyadid"]
-                if tuple(id_a) in nulls_to_skip['id'] or tuple(id_b) in nulls_to_skip['id']: #If we already know they are both null, skip
-                    continue
+                if len(nulls_to_skip) != 0:
+                    if tuple(id_a) in nulls_to_skip['id'] or tuple(id_b) in nulls_to_skip['id']: #If we already know they are both null, skip
+                        continue
                 elif (countrya == countryb) or (pair in used) or ([countryb, countrya] in used): #If we know this pair has already been cleaned, skip
                     continue
                 #else fix values that exist
                 else:
                     #set value for reverse pair
-                    data.loc[condition_b, var] = data.loc[condition_a, var].values[0]
+                    data.loc[condition_b, variable] = data.loc[condition_a, variable].values[0]
 
                 used.append(pair)
         print(f"Thread {thread_number} is done with year {year}")
@@ -74,7 +75,7 @@ if __name__ == "__main__":
     #var = 'totaltradeawithb'  #set variable name
 
     data = pd.read_csv(path, low_memory=False) #If you have less than 32GB of ram then set "low_memory" to True!
-    variables = [] #Put in Variables as Array of Strings, then run DOUBLE CHECK CAPITALIZATION AND SPELLING ARE CORRECT!
+    variables = ['distanceatob', 'distancecapitalatob', 'distancepopwghtdatob','distancepopwghtdgravityatob','distatob_searoute','sharedborder','colonialitiescow','colonialities1945cepii','commoncolonizer','commonofficiallanguage','commonspokenlanguage','commonnativelanguage','commonlanguageindex','sharedreligionindex','totaltradeawithb'] #Put in Variables as Array of Strings, then run DOUBLE CHECK CAPITALIZATION AND SPELLING ARE CORRECT!
 
     #Once a Variable is done, while the next is running do a quick review of the output CSV for any obvious mistakes.
     #If it looks clean then you may remove it from the above array so errors don't cause retreading.
@@ -86,31 +87,32 @@ if __name__ == "__main__":
         #________________________________________
         ### Fix Null Values
         nulls = data[data[variable].isnull()].index.tolist() # make list of null value index
-        nulls_to_skip["id"] = ""
-        nulls_to_skip["row_index"] = ""
-        nulls_per_thread = len(nulls) / number_of_cores
-        nulls_per_thread = round(nulls_per_thread)
-        thread_nulls = list
-        threads = []
-        for core in range(0, number_of_cores):
-            if core != number_of_cores - 1:
-                thread_start = (nulls_per_thread * core)
-                thread_end = (nulls_per_thread * (core + 1))
-                thread_nulls = nulls[thread_start : thread_end]
-            else:
-                thread_start = (nulls_per_thread * core)
-                thread_end = len(nulls)
-                thread_nulls= nulls[thread_start : thread_end]
-            try:
-                thread = threading.Thread(target= replace_nulls_in_data, args=(thread_nulls, core))
-                threads.append(thread)
-            except Exception as e:
-                print(f"I was stopped from launching thread {core} because of {e}")
-        for thread in threads:
-            thread.start()
+        if len(nulls) != 0:
+            nulls_to_skip["id"] = ""
+            nulls_to_skip["row_index"] = ""
+            nulls_per_thread = len(nulls) / number_of_cores
+            nulls_per_thread = round(nulls_per_thread)
+            thread_nulls = list
+            threads = []
+            for core in range(0, number_of_cores):
+                if core != number_of_cores - 1:
+                    thread_start = (nulls_per_thread * core)
+                    thread_end = (nulls_per_thread * (core + 1))
+                    thread_nulls = nulls[thread_start : thread_end]
+                else:
+                    thread_start = (nulls_per_thread * core)
+                    thread_end = len(nulls)
+                    thread_nulls= nulls[thread_start : thread_end]
+                try:
+                    thread = threading.Thread(target= replace_nulls_in_data, args=(thread_nulls, variable, core))
+                    threads.append(thread)
+                except Exception as e:
+                    print(f"I was stopped from launching thread {core} because of {e}")
+            for thread in threads:
+                thread.start()
 
-        for thread in threads:
-            thread.join()
+            for thread in threads:
+                thread.join()
         
         years = data.year.unique()
         year_range = len(years)
@@ -127,7 +129,7 @@ if __name__ == "__main__":
                 thread_end = len(years)
                 thread_years= years[thread_start : thread_end]
             try:
-                thread = threading.Thread(target= correct_non_null_values, args=(thread_years, core))
+                thread = threading.Thread(target= correct_non_null_values, args=(thread_years, variable, core))
                 threads.append(thread)
             except Exception as e:
                 print(f"I was stopped from launching thread {core} because of {e}")
